@@ -4,6 +4,7 @@
 //! (`Σ debits == Σ credits`). No async, no network, no blockchain here.
 
 pub mod account;
+pub mod balance;
 pub mod error;
 pub mod posting;
 pub mod transaction;
