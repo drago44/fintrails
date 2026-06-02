@@ -17,6 +17,30 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    /// Builds a transaction, enforcing the ledger invariants: the set must be
+    /// non-empty and must net to zero per asset. Returns [`LedgerError`] otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fintrails_ledger::account::{AccountId, Asset};
+    /// use fintrails_ledger::posting::Posting;
+    /// use fintrails_ledger::transaction::Transaction;
+    ///
+    /// let usd = Asset("USD".into());
+    /// let ok = Transaction::new(vec![
+    ///     Posting { account: AccountId("a".into()), asset: usd.clone(), amount: -50 },
+    ///     Posting { account: AccountId("b".into()), asset: usd.clone(), amount: 50 },
+    /// ]);
+    /// assert!(ok.is_ok());
+    ///
+    /// // Does not balance: rejected.
+    /// let bad = Transaction::new(vec![
+    ///     Posting { account: AccountId("a".into()), asset: usd.clone(), amount: -50 },
+    ///     Posting { account: AccountId("b".into()), asset: usd.clone(), amount: 40 },
+    /// ]);
+    /// assert!(bad.is_err());
+    /// ```
     pub fn new(postings: Vec<Posting>) -> Result<Self, LedgerError> {
         if postings.is_empty() {
             return Err(LedgerError::EmptyTransaction);
