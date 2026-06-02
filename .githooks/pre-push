@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Heavier gate before code leaves the machine: lint + tests.
+set -euo pipefail
+
+echo "pre-push › cargo clippy (warnings = errors)"
+cargo clippy --all-targets --all-features -- -D warnings
+
+echo "pre-push › cargo test"
+cargo test --all

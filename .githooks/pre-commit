@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Auto-format staged Rust files, then re-stage them so the fixes
+# don't reappear as new unstaged changes after the commit.
+set -euo pipefail
+
+# Collect staged (Added/Copied/Modified) Rust files only.
+files=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+
+if [ -z "$files" ]; then
+  exit 0
+fi
+
+echo "pre-commit › rustfmt + re-stage"
+echo "$files" | while IFS= read -r f; do
+  rustfmt --edition 2024 "$f"
+  git add "$f"
+done
