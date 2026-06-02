@@ -1,14 +1,6 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! `fintrails-ledger` — a pure, storage-agnostic double-entry ledger.
+//!
+//! Core invariant: every transaction balances to zero per asset
+//! (`Σ debits == Σ credits`). No async, no network, no blockchain here.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod account;
