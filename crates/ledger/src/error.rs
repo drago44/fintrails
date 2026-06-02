@@ -8,4 +8,8 @@ pub enum LedgerError {
     /// A transaction's postings do not sum to zero for this asset.
     #[error("transaction does not balance for asset {0:?}")]
     NotBalanced(Asset),
+
+    /// A transaction was created with no postings.
+    #[error("transaction has no postings")]
+    EmptyTransaction,
 }
