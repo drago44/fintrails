@@ -1,0 +1,25 @@
+# Cargo build artifacts
+/target/
+
+# rustfmt backups
+**/*.rs.bk
+
+# Debug symbols (Windows/MSVC)
+*.pdb
+
+# macOS
+.DS_Store
+
+# Secrets / env (keep .env.example as a template)
+.env
+.env.*
+!.env.example
+
+# Editors / IDE
+/.idea/
+/.vscode/
+*.iml
+*.swp
+
+# Local notes
+CLAUDE.md
