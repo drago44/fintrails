@@ -7,4 +7,5 @@ pub mod account;
 pub mod balance;
 pub mod error;
 pub mod posting;
+pub mod store;
 pub mod transaction;
