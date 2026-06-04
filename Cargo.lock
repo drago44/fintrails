@@ -1815,6 +1815,7 @@ dependencies = [
 name = "fintrails-recon"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "fintrails-indexer",
  "fintrails-ledger",
  "thiserror",

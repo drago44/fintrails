@@ -1,10 +1,10 @@
 [package]
 name = "fintrails-indexer"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
-alloy = { version = "2.0.5", features = ["full"] }
-serde = { version = "1.0.228", features = ["derive"] }
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["full"] }
+alloy = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

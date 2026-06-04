@@ -1,9 +1,10 @@
 [package]
 name = "fintrails-recon"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
+alloy = { workspace = true }
 fintrails-indexer = { version = "0.1.0", path = "../chain-indexer" }
 fintrails-ledger = { version = "0.1.0", path = "../ledger" }
-thiserror = "2.0.18"
+thiserror = { workspace = true }
