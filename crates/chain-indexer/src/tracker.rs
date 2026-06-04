@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use alloy::primitives::B256;
 
 /// Minimal header of a block the tracker has seen.
@@ -30,20 +32,38 @@ pub struct TrackerUpdate {
 #[derive(Debug)]
 pub struct Tracker {
     confirmations: u64,
-    /// Seen blocks in ascending order. This step assumes linear growth and does
-    /// not trim; windowing arrives with reorg handling.
-    chain: Vec<BlockRef>,
+    /// Recent blocks, oldest at the front. A `VecDeque` so trimming the oldest
+    /// (`pop_front`) and extending the head (`push_back`) are both O(1).
+    chain: VecDeque<BlockRef>,
+    /// Most recent blocks retained. Bounds memory and the reorg depth we can
+    /// detect; must exceed `confirmations` so a block survives until confirmed.
+    window: usize,
     /// Highest block number already reported as confirmed (the watermark).
     confirmed_through: Option<u64>,
 }
 
+/// Default window: deep enough to dwarf any realistic reorg on a finalizing chain.
+const DEFAULT_WINDOW: usize = 256;
+
 impl Tracker {
     /// Creates a tracker requiring `confirmations` blocks on top before a block
-    /// is considered confirmed.
+    /// is considered confirmed, retaining a default window of recent blocks.
     pub fn new(confirmations: u64) -> Self {
+        Self::with_window(confirmations, DEFAULT_WINDOW)
+    }
+
+    /// Like [`Tracker::new`] but with an explicit retention `window`. Panics if
+    /// `window` does not exceed `confirmations` (a block would be dropped before
+    /// it could be confirmed).
+    pub fn with_window(confirmations: u64, window: usize) -> Self {
+        assert!(
+            window as u64 > confirmations,
+            "window ({window}) must exceed confirmation depth ({confirmations})"
+        );
         Self {
             confirmations,
-            chain: Vec::new(),
+            chain: VecDeque::new(),
+            window,
             confirmed_through: None,
         }
     }
@@ -57,15 +77,15 @@ impl Tracker {
         // Roll back conflicting blocks until `block` attaches to its parent
         // (or the chain empties). A non-empty `reorged` means a reorg happened.
         let mut reorged = Vec::new();
-        while let Some(top) = self.chain.last() {
+        while let Some(top) = self.chain.back() {
             let attaches = top.number + 1 == block.number && top.hash == block.parent_hash;
             if attaches {
                 break;
             }
-            reorged.push(self.chain.pop().expect("last() was Some"));
+            reorged.push(self.chain.pop_back().expect("back() was Some"));
         }
         reorged.reverse(); // ascending by number, like `confirmed`
-        self.chain.push(block);
+        self.chain.push_back(block);
 
         // If the rollback orphaned blocks at or below the watermark, they were
         // wrongly confirmed: pull the watermark back below the lowest of them.
@@ -77,7 +97,7 @@ impl Tracker {
             };
         }
 
-        let head = self.chain.last().expect("just pushed a block").number;
+        let head = self.chain.back().expect("just pushed a block").number;
         let mut confirmed = Vec::new();
         if let Some(confirmed_max) = head.checked_sub(self.confirmations) {
             // Emit only blocks past the watermark, up to the new confirmed height.
@@ -92,12 +112,23 @@ impl Tracker {
             }
         }
 
+        // Bound memory: drop the oldest blocks beyond the window. Done last, so
+        // a just-confirmed block was still present for the emission above.
+        while self.chain.len() > self.window {
+            self.chain.pop_front();
+        }
+
         TrackerUpdate { confirmed, reorged }
     }
 
     /// Highest confirmed block number so far, or `None` if nothing is confirmed.
     pub fn confirmed_height(&self) -> Option<u64> {
         self.confirmed_through
+    }
+
+    #[cfg(test)]
+    fn tracked_len(&self) -> usize {
+        self.chain.len()
     }
 }
 
@@ -208,6 +239,44 @@ mod tests {
         let update = tracker.observe(alt3);
         assert_eq!(update.confirmed, vec![alt2]);
         assert_eq!(tracker.confirmed_height(), Some(2));
+    }
+
+    #[test]
+    fn old_blocks_are_trimmed_to_the_window() {
+        let mut tracker = Tracker::with_window(1, 3);
+        for n in 0..10 {
+            tracker.observe(block(n));
+        }
+        // Memory is bounded regardless of how many blocks streamed through.
+        assert!(tracker.tracked_len() <= 3);
+        // Confirmations were still emitted at the right time despite trimming.
+        assert_eq!(tracker.confirmed_height(), Some(8));
+    }
+
+    #[test]
+    fn reorg_within_the_window_still_rolls_back_after_trimming() {
+        let mut tracker = Tracker::with_window(1, 4);
+        for n in 0..8 {
+            tracker.observe(block(n));
+        }
+        // Fork at block 5, which is still inside the retained window.
+        let update = tracker.observe(alt(6, block(5).hash));
+        assert_eq!(update.reorged, vec![block(6), block(7)]);
+    }
+
+    #[test]
+    fn reorg_deeper_than_the_window_drains_the_chain_safely() {
+        // Documented limit: if the fork point has already been trimmed, the
+        // tracker cannot pinpoint it — it orphans everything it still holds and
+        // restarts from the new block. Safe (no panic), just coarser.
+        let mut tracker = Tracker::with_window(1, 3);
+        for n in 0..8 {
+            tracker.observe(block(n));
+        }
+        // Block 2 (the real fork point) is long gone from the window.
+        let update = tracker.observe(alt(3, block(2).hash));
+        assert_eq!(update.reorged, vec![block(5), block(6), block(7)]);
+        assert_eq!(tracker.tracked_len(), 1);
     }
 
     #[test]
