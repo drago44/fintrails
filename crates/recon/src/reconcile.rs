@@ -49,13 +49,13 @@ fn u256_to_i128(value: U256) -> Result<i128, ReconError> {
 
 /// Maps a chain address to a ledger account id. Thin slice: raw address under an
 /// `onchain:` namespace. Invoice/merchant accounts come later (recon Phase 1).
-fn account_of(addr: Address) -> AccountId {
+pub fn account_of(addr: Address) -> AccountId {
     AccountId(format!("onchain:{addr:#x}"))
 }
 
 /// Maps a token contract to a ledger asset. Thin slice: the raw token address.
 /// Symbol/decimals resolution comes later (recon Phase 1).
-fn asset_of(token: Address) -> Asset {
+pub fn asset_of(token: Address) -> Asset {
     Asset(format!("{token:#x}"))
 }
 
