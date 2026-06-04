@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy::primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// A single confirmed ERC-20 `Transfer`, as the indexer hands it to the outside
