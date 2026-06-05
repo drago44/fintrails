@@ -9,5 +9,5 @@ edition = "2024"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 rust_decimal = "1.42.0"
-alloy = { version = "2.0.5", features = ["full"] }
-tokio = { version = "1.52.3", features = ["full"] }
+alloy = { version = "2.0.5", features = ["provider-http", "rpc-types-eth", "sol-types"] }
+tokio = { version = "1.52.3", features = ["sync", "time", "macros", "rt"] }
