@@ -82,11 +82,16 @@ pub fn http_provider(rpc_url: &str) -> Result<impl Provider, SourceError> {
     Ok(ProviderBuilder::new().connect_http(url))
 }
 
+/// Default backfill window size. Conservative enough to clear the block-range
+/// and result-count caps most public RPC providers enforce on `eth_getLogs`.
+pub const DEFAULT_MAX_BLOCK_SPAN: u64 = 2000;
+
 /// Fetches ERC-20 `Transfer` logs for `token` over the inclusive block range
-/// `[from_block, to_block]` and decodes them into [`ChainEvent`]s.
+/// `[from_block, to_block]`, splitting it into [`DEFAULT_MAX_BLOCK_SPAN`]-sized
+/// windows so a large backfill does not exceed provider limits.
 ///
-/// Backfill only: a single `eth_getLogs` call. No range chunking, retries,
-/// confirmation waiting or reorg handling yet — those are later steps.
+/// Backfill only: no retries, confirmation waiting or reorg handling — those
+/// are later steps. A single window's failure fails the whole call.
 pub async fn fetch_transfers(
     rpc_url: &str,
     token: Address,
@@ -94,11 +99,60 @@ pub async fn fetch_transfers(
     to_block: u64,
 ) -> Result<Vec<ChainEvent>, SourceError> {
     let provider = http_provider(rpc_url)?;
-    fetch_transfers_with(&provider, token, from_block, to_block).await
+    fetch_transfers_chunked(
+        &provider,
+        token,
+        from_block,
+        to_block,
+        DEFAULT_MAX_BLOCK_SPAN,
+    )
+    .await
 }
 
-/// Core of [`fetch_transfers`] over a caller-supplied provider, so a single
-/// connection can be reused across many calls (e.g. by the poller).
+/// Like [`fetch_transfers`] but over a caller-supplied provider and an explicit
+/// `max_span`. Fetches each [`block_windows`] window in order and concatenates
+/// the results, so events stay ascending by block.
+pub async fn fetch_transfers_chunked<P: Provider>(
+    provider: &P,
+    token: Address,
+    from_block: u64,
+    to_block: u64,
+    max_span: u64,
+) -> Result<Vec<ChainEvent>, SourceError> {
+    let mut events = Vec::new();
+    for (start, end) in block_windows(from_block, to_block, max_span) {
+        events.extend(fetch_transfers_with(provider, token, start, end).await?);
+    }
+    Ok(events)
+}
+
+/// Splits the inclusive range `[from, to]` into consecutive non-overlapping
+/// windows of at most `max_span` blocks each. Returns empty when `from > to`.
+///
+/// Pure (no network) so the boundary arithmetic is unit-testable on its own.
+/// `max_span` is clamped to at least 1 to rule out a zero-width, non-advancing
+/// window (which would loop forever).
+fn block_windows(from: u64, to: u64, max_span: u64) -> Vec<(u64, u64)> {
+    let span = max_span.max(1);
+    let mut windows = Vec::new();
+    let mut start = from;
+    while start <= to {
+        // `span - 1` because the range is inclusive; saturating so a huge span
+        // near u64::MAX cannot overflow past `to`.
+        let end = start.saturating_add(span - 1).min(to);
+        windows.push((start, end));
+        // `end + 1` cannot overflow: if `end == u64::MAX` then `end == to` and
+        // the loop has already covered everything, so we break first.
+        if end == to {
+            break;
+        }
+        start = end + 1;
+    }
+    windows
+}
+
+/// Core single-window fetch: one `eth_getLogs` over `[from_block, to_block]`.
+/// Reused per window by [`fetch_transfers_chunked`].
 pub async fn fetch_transfers_with<P: Provider>(
     provider: &P,
     token: Address,
@@ -184,5 +238,47 @@ mod tests {
             result,
             Err(SourceError::IncompleteLog("block_number"))
         ));
+    }
+
+    #[test]
+    fn windows_cover_a_range_with_a_partial_last_window() {
+        // 0..=9 in spans of 4: [0,3], [4,7], [8,9] (remainder).
+        assert_eq!(
+            block_windows(0, 9, 4),
+            vec![(0, 3), (4, 7), (8, 9)],
+            "windows must tile the range contiguously, last one short"
+        );
+    }
+
+    #[test]
+    fn windows_split_evenly_when_span_divides_the_range() {
+        assert_eq!(block_windows(0, 5, 3), vec![(0, 2), (3, 5)]);
+    }
+
+    #[test]
+    fn a_range_within_one_span_is_a_single_window() {
+        assert_eq!(block_windows(10, 12, 100), vec![(10, 12)]);
+    }
+
+    #[test]
+    fn a_single_block_is_one_window() {
+        assert_eq!(block_windows(7, 7, 2000), vec![(7, 7)]);
+    }
+
+    #[test]
+    fn an_empty_range_yields_no_windows() {
+        assert!(block_windows(5, 4, 10).is_empty());
+    }
+
+    #[test]
+    fn zero_span_is_clamped_and_still_terminates() {
+        // max_span 0 would be a non-advancing window; clamped to 1.
+        assert_eq!(block_windows(3, 5, 0), vec![(3, 3), (4, 4), (5, 5)]);
+    }
+
+    #[test]
+    fn a_window_ending_at_u64_max_does_not_overflow() {
+        let max = u64::MAX;
+        assert_eq!(block_windows(max - 1, max, 1000), vec![(max - 1, max)]);
     }
 }
