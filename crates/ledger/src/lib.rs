@@ -6,10 +6,7 @@
 //! # Example
 //!
 //! ```
-//! use fintrails_ledger::account::{AccountId, Asset};
-//! use fintrails_ledger::posting::Posting;
-//! use fintrails_ledger::store::{InMemoryStore, LedgerStore};
-//! use fintrails_ledger::transaction::Transaction;
+//! use fintrails_ledger::{AccountId, Asset, InMemoryStore, LedgerStore, Posting, Transaction};
 //!
 //! let usd = Asset("USD".into());
 //!
@@ -27,9 +24,20 @@
 //! assert_eq!(store.balance(&AccountId("card".into()), &usd).unwrap(), -100);
 //! ```
 
-pub mod account;
-pub mod balance;
-pub mod error;
-pub mod posting;
-pub mod store;
-pub mod transaction;
+mod account;
+pub use account::{AccountId, Asset};
+
+mod posting;
+pub use posting::Posting;
+
+mod transaction;
+pub use transaction::Transaction;
+
+mod balance;
+pub use balance::balance_of;
+
+mod store;
+pub use store::{InMemoryStore, LedgerStore};
+
+mod error;
+pub use error::LedgerError;

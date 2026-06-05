@@ -4,12 +4,9 @@ use std::collections::HashSet;
 
 use proptest::prelude::*;
 
-use fintrails_ledger::account::{AccountId, Asset};
-use fintrails_ledger::balance::balance_of;
-use fintrails_ledger::error::LedgerError;
-use fintrails_ledger::posting::Posting;
-use fintrails_ledger::store::{InMemoryStore, LedgerStore};
-use fintrails_ledger::transaction::Transaction;
+use fintrails_ledger::{
+    AccountId, Asset, InMemoryStore, LedgerError, LedgerStore, Posting, Transaction, balance_of,
+};
 
 // --- shared helpers -------------------------------------------------------
 

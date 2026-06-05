@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use fintrails_ledger::error::LedgerError;
+use fintrails_ledger::LedgerError;
 
 /// Anything that can go wrong while turning a chain event into a ledger entry.
 #[derive(Debug, Error)]

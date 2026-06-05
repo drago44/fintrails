@@ -5,7 +5,10 @@
 //! the two meet: on-chain `U256` base units are converted to ledger `i128`
 //! minor units here and nowhere else (see CLAUDE.md §8).
 //!
-//! [`ChainEvent`]: fintrails_indexer::event::ChainEvent
+//! [`ChainEvent`]: fintrails_indexer::ChainEvent
 
-pub mod error;
-pub mod reconcile;
+mod reconcile;
+pub use reconcile::{account_of, asset_of, event_to_transaction, idempotency_key};
+
+mod error;
+pub use error::ReconError;

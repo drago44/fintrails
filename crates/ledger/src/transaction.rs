@@ -23,9 +23,7 @@ impl Transaction {
     /// # Examples
     ///
     /// ```
-    /// use fintrails_ledger::account::{AccountId, Asset};
-    /// use fintrails_ledger::posting::Posting;
-    /// use fintrails_ledger::transaction::Transaction;
+    /// use fintrails_ledger::{AccountId, Asset, Posting, Transaction};
     ///
     /// let usd = Asset("USD".into());
     /// let ok = Transaction::new(vec![
