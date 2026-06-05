@@ -40,3 +40,58 @@ pub fn balance_of(
             asset: asset.clone(),
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::posting::Posting;
+
+    /// A transaction that nets to zero by construction: random legs over a
+    /// small account pool, plus one balancing leg.
+    fn balanced_tx() -> impl Strategy<Value = Transaction> {
+        prop::collection::vec((0..5usize, -1_000_000_000i128..=1_000_000_000), 1..8).prop_map(
+            |legs| {
+                let sum: i128 = legs.iter().map(|(_, amount)| amount).sum();
+                let mut postings: Vec<Posting> = legs
+                    .into_iter()
+                    .map(|(i, amount)| Posting {
+                        account: AccountId(format!("acc{i}")),
+                        asset: Asset("USD".into()),
+                        amount,
+                    })
+                    .collect();
+                postings.push(Posting {
+                    account: AccountId("balancer".into()),
+                    asset: Asset("USD".into()),
+                    amount: -sum,
+                });
+                Transaction::new(postings).unwrap()
+            },
+        )
+    }
+
+    proptest! {
+        /// Double-entry's defining property: across every account, a journal of
+        /// balanced transactions sums to zero per asset.
+        #[test]
+        fn journal_balances_sum_to_zero(txs in prop::collection::vec(balanced_tx(), 0..10)) {
+            let usd = Asset("USD".into());
+            let accounts: HashSet<AccountId> = txs
+                .iter()
+                .flat_map(|tx| tx.postings())
+                .map(|p| p.account.clone())
+                .collect();
+
+            let total: i128 = accounts
+                .iter()
+                .map(|a| balance_of(&txs, a, &usd).unwrap())
+                .sum();
+
+            prop_assert_eq!(total, 0);
+        }
+    }
+}

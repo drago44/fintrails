@@ -1628,6 +1628,7 @@ dependencies = [
 name = "fintrails-ledger"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "rust_decimal",
  "serde",
  "thiserror",

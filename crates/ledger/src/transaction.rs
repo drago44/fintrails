@@ -95,8 +95,59 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
     use crate::account::AccountId;
+
+    /// A handful of reused account ids so generated transactions overlap.
+    fn account_strat() -> impl Strategy<Value = AccountId> {
+        (0..5usize).prop_map(|i| AccountId(format!("acc{i}")))
+    }
+
+    /// 1..8 legs in a single asset; amounts bounded so sums stay far from
+    /// the `i128` range (overflow is a separate invariant).
+    fn legs_strat() -> impl Strategy<Value = Vec<(AccountId, i128)>> {
+        prop::collection::vec((account_strat(), -1_000_000_000i128..=1_000_000_000), 1..8)
+    }
+
+    fn usd_posting(account: AccountId, amount: i128) -> Posting {
+        Posting {
+            account,
+            asset: Asset("USD".into()),
+            amount,
+        }
+    }
+
+    proptest! {
+        /// Any set made to net to zero (legs + a balancing leg) is accepted.
+        #[test]
+        fn balanced_transaction_is_always_accepted(legs in legs_strat()) {
+            let sum: i128 = legs.iter().map(|(_, amount)| amount).sum();
+            let mut postings: Vec<Posting> =
+                legs.into_iter().map(|(a, m)| usd_posting(a, m)).collect();
+            postings.push(usd_posting(AccountId("balancer".into()), -sum));
+
+            prop_assert!(Transaction::new(postings).is_ok());
+        }
+
+        /// Perturbing the balancing leg by a non-zero delta breaks `Σ=0`.
+        #[test]
+        fn unbalanced_transaction_is_always_rejected(
+            legs in legs_strat(),
+            perturb in 1i128..=1_000_000,
+        ) {
+            let sum: i128 = legs.iter().map(|(_, amount)| amount).sum();
+            let mut postings: Vec<Posting> =
+                legs.into_iter().map(|(a, m)| usd_posting(a, m)).collect();
+            postings.push(usd_posting(AccountId("balancer".into()), -sum + perturb));
+
+            prop_assert!(matches!(
+                Transaction::new(postings),
+                Err(LedgerError::NotBalanced(_))
+            ));
+        }
+    }
 
     fn posting(account: &str, asset: &str, amount: i128) -> Posting {
         Posting {

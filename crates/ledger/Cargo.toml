@@ -7,3 +7,6 @@ edition.workspace = true
 rust_decimal = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.11.0"
