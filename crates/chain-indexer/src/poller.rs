@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use crate::error::SourceError;
+use crate::checkpoint::{Checkpoint, NoCheckpoint};
+use crate::error::PollerError;
 use crate::event::ChainEvent;
 use crate::source::BlockSource;
 use crate::tracker::{BlockRef, Tracker};
@@ -25,28 +26,59 @@ pub enum IndexerMessage {
 /// The poller owns the *fetching* (and the backward walk that re-pulls a forked
 /// branch); the tracker owns the *bookkeeping* (confirmation depth, rollback).
 /// Generic over [`BlockSource`] so the network is swappable for a fake in tests.
-pub struct Poller<S> {
+pub struct Poller<S, C> {
     source: S,
+    checkpoint: C,
     tracker: Tracker,
     /// First block to index on a cold start (before the tracker holds anything).
     start_block: u64,
     poll_interval: Duration,
+    /// Last height handed to the checkpoint, so we only persist on a change.
+    last_saved: Option<u64>,
 }
 
-impl<S: BlockSource> Poller<S> {
+impl<S: BlockSource> Poller<S, NoCheckpoint> {
+    /// A poller that persists nothing: on restart it re-indexes from
+    /// `start_block`. Fine for tests and one-shot backfills.
     pub fn new(source: S, tracker: Tracker, start_block: u64, poll_interval: Duration) -> Self {
         Self {
             source,
+            checkpoint: NoCheckpoint,
             tracker,
             start_block,
             poll_interval,
+            last_saved: None,
         }
+    }
+}
+
+impl<S: BlockSource, C: Checkpoint> Poller<S, C> {
+    /// Builds a poller that resumes from `checkpoint`: indexing continues just
+    /// past the last persisted height, so a crash-and-restart neither skips nor
+    /// re-confirms blocks. Falls back to `start_block` on a cold checkpoint.
+    pub async fn resume(
+        source: S,
+        checkpoint: C,
+        tracker: Tracker,
+        start_block: u64,
+        poll_interval: Duration,
+    ) -> Result<Self, PollerError> {
+        let resumed_from = checkpoint.load().await?;
+        let start_block = resumed_from.map_or(start_block, |h| h + 1);
+        Ok(Self {
+            source,
+            checkpoint,
+            tracker,
+            start_block,
+            poll_interval,
+            last_saved: resumed_from,
+        })
     }
 
     /// Polls once: pulls whatever is new since last time and returns the
     /// resulting messages. The unit of behaviour — [`run`](Self::run) is just
     /// this in a loop, so tests drive `advance` directly without a clock.
-    pub async fn advance(&mut self) -> Result<Vec<IndexerMessage>, SourceError> {
+    pub async fn advance(&mut self) -> Result<Vec<IndexerMessage>, PollerError> {
         let head_num = self.source.head_number().await?;
         let mut msgs = Vec::new();
 
@@ -81,13 +113,30 @@ impl<S: BlockSource> Poller<S> {
             }
         }
 
+        // Persist progress once the whole tick settles. We save on any change,
+        // including a reorg that pulled the watermark *down* — that height is
+        // the new truth and we must resume from it, not from the stale higher
+        // one. Saving here (not per `observe`) avoids persisting the transient
+        // low watermarks seen while catching up the unconfirmed tail.
+        if let Some(height) = self.tracker.confirmed_height()
+            && self.last_saved != Some(height)
+        {
+            self.checkpoint.save(height).await?;
+            self.last_saved = Some(height);
+        }
+
         Ok(msgs)
+    }
+
+    #[cfg(test)]
+    fn checkpoint(&self) -> &C {
+        &self.checkpoint
     }
 
     /// Runs the poll loop forever, sending each message on `tx`. Returns `Ok`
     /// when the consumer drops the receiver; returns `Err` on the first RPC
     /// failure (retry/backoff is a later step).
-    pub async fn run(mut self, tx: mpsc::Sender<IndexerMessage>) -> Result<(), SourceError> {
+    pub async fn run(mut self, tx: mpsc::Sender<IndexerMessage>) -> Result<(), PollerError> {
         loop {
             for msg in self.advance().await? {
                 if tx.send(msg).await.is_err() {
@@ -105,7 +154,7 @@ impl<S: BlockSource> Poller<S> {
         &mut self,
         block: BlockRef,
         msgs: &mut Vec<IndexerMessage>,
-    ) -> Result<(), SourceError> {
+    ) -> Result<(), PollerError> {
         // Walk back from `block`, fetching ancestors, until we reach one whose
         // parent the tracker already agrees with by hash. On the happy path this
         // stops immediately (the parent is our current head).
@@ -152,6 +201,7 @@ impl<S: BlockSource> Poller<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SourceError;
     use alloy::primitives::{Address, B256, U256};
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -299,6 +349,58 @@ mod tests {
         assert!(msgs.contains(&IndexerMessage::Reorged {
             orphaned: vec![block(3)],
         }));
+    }
+
+    #[tokio::test]
+    async fn resume_skips_blocks_confirmed_by_a_prior_run() {
+        use crate::checkpoint::InMemoryCheckpoint;
+
+        let src = FakeSource::default();
+        for n in 0..=5 {
+            src.set_block(block(n));
+        }
+        src.add_event(transfer(1, 100)); // already handled last run
+        src.add_event(transfer(4, 400)); // new since the crash
+
+        // A prior run checkpointed through block 2; resume continues past it.
+        let cp = InMemoryCheckpoint::at(2);
+        let mut poller = Poller::resume(src, cp, Tracker::new(1), 0, Duration::ZERO)
+            .await
+            .unwrap();
+        let msgs = poller.advance().await.unwrap();
+
+        let events = confirmed_events(&msgs);
+        assert!(
+            events.iter().all(|e| e.block_number > 2),
+            "no re-emit of ≤2"
+        );
+        assert!(
+            events.iter().any(|e| e.block_number == 4),
+            "new block surfaces"
+        );
+    }
+
+    #[tokio::test]
+    async fn advance_persists_the_confirmed_height() {
+        use crate::checkpoint::{Checkpoint, InMemoryCheckpoint};
+
+        let src = FakeSource::default();
+        for n in 0..=3 {
+            src.set_block(block(n));
+        }
+        let mut poller = Poller::resume(
+            src,
+            InMemoryCheckpoint::new(),
+            Tracker::new(1),
+            0,
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        poller.advance().await.unwrap();
+
+        // Head 3 with N=1 confirms through block 2; that height is persisted.
+        assert_eq!(poller.checkpoint().load().await.unwrap(), Some(2));
     }
 
     #[tokio::test]
