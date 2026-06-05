@@ -90,7 +90,19 @@ impl<S: BlockSource> BlockSource for RetryingSource<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::sol_types::Error as DecodeError;
+    use alloy::transports::TransportErrorKind;
     use std::cell::Cell;
+
+    /// A retryable transport error, for tests.
+    fn rpc_err(msg: &str) -> SourceError {
+        SourceError::Rpc(TransportErrorKind::custom_str(msg))
+    }
+
+    /// A non-retryable decode error, for tests.
+    fn decode_err(msg: &str) -> SourceError {
+        SourceError::Decode(DecodeError::custom(msg.to_owned()))
+    }
 
     fn instant_policy(max_retries: u32) -> RetryPolicy {
         RetryPolicy {
@@ -102,9 +114,9 @@ mod tests {
 
     #[test]
     fn only_rpc_errors_are_retryable() {
-        assert!(SourceError::Rpc("timeout".into()).is_retryable());
+        assert!(rpc_err("timeout").is_retryable());
         assert!(!SourceError::InvalidUrl("bad".into()).is_retryable());
-        assert!(!SourceError::Decode("garbage".into()).is_retryable());
+        assert!(!decode_err("garbage").is_retryable());
         assert!(!SourceError::IncompleteLog("tx_hash").is_retryable());
     }
 
@@ -132,7 +144,7 @@ mod tests {
             let n = calls.get();
             async move {
                 if n < 3 {
-                    Err(SourceError::Rpc("flaky".into()))
+                    Err(rpc_err("flaky"))
                 } else {
                     Ok(42u64)
                 }
@@ -149,7 +161,7 @@ mod tests {
         let calls = Cell::new(0);
         let result: Result<(), _> = with_retry(&instant_policy(5), || {
             calls.set(calls.get() + 1);
-            async { Err(SourceError::Decode("bad".into())) }
+            async { Err(decode_err("bad")) }
         })
         .await;
 
@@ -162,7 +174,7 @@ mod tests {
         let calls = Cell::new(0);
         let result: Result<(), _> = with_retry(&instant_policy(2), || {
             calls.set(calls.get() + 1);
-            async { Err(SourceError::Rpc("always down".into())) }
+            async { Err(rpc_err("always down")) }
         })
         .await;
 

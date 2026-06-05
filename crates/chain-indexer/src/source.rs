@@ -47,18 +47,14 @@ impl<P: Provider> RpcBlockSource<P> {
 
 impl<P: Provider> BlockSource for RpcBlockSource<P> {
     async fn head_number(&self) -> Result<u64, SourceError> {
-        self.provider
-            .get_block_number()
-            .await
-            .map_err(|e| SourceError::Rpc(format!("{e}")))
+        Ok(self.provider.get_block_number().await?)
     }
 
     async fn block_ref(&self, number: u64) -> Result<BlockRef, SourceError> {
         let block = self
             .provider
             .get_block_by_number(BlockNumberOrTag::Number(number))
-            .await
-            .map_err(|e| SourceError::Rpc(format!("{e}")))?
+            .await?
             .ok_or(SourceError::IncompleteLog("block"))?;
 
         Ok(BlockRef {
@@ -165,10 +161,7 @@ pub async fn fetch_transfers_with<P: Provider>(
         .from_block(from_block)
         .to_block(to_block);
 
-    let logs = provider
-        .get_logs(&filter)
-        .await
-        .map_err(|e| SourceError::Rpc(format!("{e}")))?;
+    let logs = provider.get_logs(&filter).await?;
 
     logs.iter().map(log_to_event).collect()
 }
@@ -176,8 +169,7 @@ pub async fn fetch_transfers_with<P: Provider>(
 /// Pure decode of one fetched log into a [`ChainEvent`]. No network — split out
 /// from [`fetch_transfers`] so the decode logic is unit-testable on its own.
 fn log_to_event(log: &alloy::rpc::types::Log) -> Result<ChainEvent, SourceError> {
-    let decoded =
-        Transfer::decode_log(&log.inner).map_err(|e| SourceError::Decode(format!("{e}")))?;
+    let decoded = Transfer::decode_log(&log.inner)?;
 
     Ok(ChainEvent {
         token: log.inner.address,
