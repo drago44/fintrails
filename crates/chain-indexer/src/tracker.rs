@@ -126,6 +126,19 @@ impl Tracker {
         self.confirmed_through
     }
 
+    /// The current head (highest block) the tracker holds, or `None` if empty.
+    /// The poller reads this to know which block number to fetch next.
+    pub fn head(&self) -> Option<&BlockRef> {
+        self.chain.back()
+    }
+
+    /// The retained block at `number`, if still inside the window. Lets the
+    /// poller compare a freshly fetched block's `parent_hash` against what the
+    /// tracker already holds, so it can detect a fork and walk back to it.
+    pub fn block_at(&self, number: u64) -> Option<&BlockRef> {
+        self.chain.iter().find(|b| b.number == number)
+    }
+
     #[cfg(test)]
     fn tracked_len(&self) -> usize {
         self.chain.len()

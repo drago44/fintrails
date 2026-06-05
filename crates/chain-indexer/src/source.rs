@@ -1,3 +1,4 @@
+use alloy::eips::BlockNumberOrTag;
 use alloy::primitives::Address;
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::rpc::types::Filter;
@@ -6,10 +7,79 @@ use alloy::sol_types::SolEvent;
 
 use crate::error::SourceError;
 use crate::event::ChainEvent;
+use crate::tracker::BlockRef;
 
 sol! {
     // Standard ERC-20 Transfer; alloy derives the decoder and signature hash.
     event Transfer(address indexed from, address indexed to, uint256 value);
+}
+
+/// Reads block metadata and `Transfer` logs from a single chain, for one token.
+///
+/// This is the boundary the [`Poller`](crate::poller::Poller) depends on. The
+/// production implementation is [`RpcBlockSource`]; tests substitute an
+/// in-memory fake, so the poller's reorg logic is exercisable without a node.
+#[allow(async_fn_in_trait)] // single-crate use; we never box these futures.
+pub trait BlockSource {
+    /// The current chain head's block number.
+    async fn head_number(&self) -> Result<u64, SourceError>;
+
+    /// The block at `number`, as a [`BlockRef`] (number, hash, parent hash).
+    async fn block_ref(&self, number: u64) -> Result<BlockRef, SourceError>;
+
+    /// `Transfer` events for the token over the inclusive range `[from, to]`.
+    async fn transfers(&self, from: u64, to: u64) -> Result<Vec<ChainEvent>, SourceError>;
+}
+
+/// A [`BlockSource`] backed by a live JSON-RPC provider, scoped to one token.
+pub struct RpcBlockSource<P> {
+    provider: P,
+    token: Address,
+}
+
+impl<P: Provider> RpcBlockSource<P> {
+    /// Wraps an already-built provider. Keeping the provider external means one
+    /// connection is reused across every poll, rather than reconnecting per call.
+    pub fn new(provider: P, token: Address) -> Self {
+        Self { provider, token }
+    }
+}
+
+impl<P: Provider> BlockSource for RpcBlockSource<P> {
+    async fn head_number(&self) -> Result<u64, SourceError> {
+        self.provider
+            .get_block_number()
+            .await
+            .map_err(|e| SourceError::Rpc(format!("{e}")))
+    }
+
+    async fn block_ref(&self, number: u64) -> Result<BlockRef, SourceError> {
+        let block = self
+            .provider
+            .get_block_by_number(BlockNumberOrTag::Number(number))
+            .await
+            .map_err(|e| SourceError::Rpc(format!("{e}")))?
+            .ok_or(SourceError::IncompleteLog("block"))?;
+
+        Ok(BlockRef {
+            number: block.header.number,
+            hash: block.header.hash,
+            parent_hash: block.header.parent_hash,
+        })
+    }
+
+    async fn transfers(&self, from: u64, to: u64) -> Result<Vec<ChainEvent>, SourceError> {
+        fetch_transfers_with(&self.provider, self.token, from, to).await
+    }
+}
+
+/// Builds an HTTP JSON-RPC provider from `rpc_url`, ready to hand to
+/// [`RpcBlockSource::new`] or [`fetch_transfers_with`].
+pub fn http_provider(rpc_url: &str) -> Result<impl Provider, SourceError> {
+    let url = rpc_url
+        .parse()
+        .map_err(|e| SourceError::InvalidUrl(format!("{e}")))?;
+    Ok(ProviderBuilder::new().connect_http(url))
 }
 
 /// Fetches ERC-20 `Transfer` logs for `token` over the inclusive block range
@@ -23,11 +93,18 @@ pub async fn fetch_transfers(
     from_block: u64,
     to_block: u64,
 ) -> Result<Vec<ChainEvent>, SourceError> {
-    let url = rpc_url
-        .parse()
-        .map_err(|e| SourceError::InvalidUrl(format!("{e}")))?;
-    let provider = ProviderBuilder::new().connect_http(url);
+    let provider = http_provider(rpc_url)?;
+    fetch_transfers_with(&provider, token, from_block, to_block).await
+}
 
+/// Core of [`fetch_transfers`] over a caller-supplied provider, so a single
+/// connection can be reused across many calls (e.g. by the poller).
+pub async fn fetch_transfers_with<P: Provider>(
+    provider: &P,
+    token: Address,
+    from_block: u64,
+    to_block: u64,
+) -> Result<Vec<ChainEvent>, SourceError> {
     let filter = Filter::new()
         .address(token)
         .event_signature(Transfer::SIGNATURE_HASH)
