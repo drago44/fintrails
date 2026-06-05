@@ -23,8 +23,8 @@
 //! let mut store = InMemoryStore::new();
 //! store.append("tx-1", tx).expect("appended");
 //!
-//! assert_eq!(store.balance(&AccountId("cash".into()), &usd), 100);
-//! assert_eq!(store.balance(&AccountId("card".into()), &usd), -100);
+//! assert_eq!(store.balance(&AccountId("cash".into()), &usd).unwrap(), 100);
+//! assert_eq!(store.balance(&AccountId("card".into()), &usd).unwrap(), -100);
 //! ```
 
 pub mod account;

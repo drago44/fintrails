@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::account::Asset;
+use crate::account::{AccountId, Asset};
 
 /// Anything that can go wrong inside the ledger core. Grows as operations are added.
 #[derive(Debug, Error)]
@@ -12,4 +12,8 @@ pub enum LedgerError {
     /// A transaction was created with no postings.
     #[error("transaction has no postings")]
     EmptyTransaction,
+
+    /// Accumulating an account balance exceeded the `i128` range.
+    #[error("balance overflow for account {account:?} in asset {asset:?}")]
+    Overflow { account: AccountId, asset: Asset },
 }

@@ -44,8 +44,8 @@ fn single_transfer_credits_receiver_and_debits_sender() {
     ingest(&mut store, &transfer(payer, payee, token, 100, 0));
 
     let asset = asset_of(token);
-    assert_eq!(store.balance(&account_of(payee), &asset), 100);
-    assert_eq!(store.balance(&account_of(payer), &asset), -100);
+    assert_eq!(store.balance(&account_of(payee), &asset).unwrap(), 100);
+    assert_eq!(store.balance(&account_of(payer), &asset).unwrap(), -100);
 }
 
 #[test]
@@ -60,7 +60,10 @@ fn replaying_the_same_event_does_not_double_count() {
     ingest(&mut store, &event); // at-least-once delivery: same (tx_hash, log_index)
 
     // Idempotent end to end: the second pass is a no-op, not a double credit.
-    assert_eq!(store.balance(&account_of(payee), &asset_of(token)), 100);
+    assert_eq!(
+        store.balance(&account_of(payee), &asset_of(token)).unwrap(),
+        100
+    );
 }
 
 #[test]
@@ -81,8 +84,17 @@ fn create2_sweep_split_flow_composes_balances() {
 
     let asset = asset_of(usdc);
     // The child address is fully drained: it nets to zero after sweep + split.
-    assert_eq!(store.balance(&account_of(child), &asset), 0);
-    assert_eq!(store.balance(&account_of(payout), &asset), 99_500_000);
-    assert_eq!(store.balance(&account_of(treasury), &asset), 500_000);
-    assert_eq!(store.balance(&account_of(cex), &asset), -100_000_000);
+    assert_eq!(store.balance(&account_of(child), &asset).unwrap(), 0);
+    assert_eq!(
+        store.balance(&account_of(payout), &asset).unwrap(),
+        99_500_000
+    );
+    assert_eq!(
+        store.balance(&account_of(treasury), &asset).unwrap(),
+        500_000
+    );
+    assert_eq!(
+        store.balance(&account_of(cex), &asset).unwrap(),
+        -100_000_000
+    );
 }

@@ -12,7 +12,7 @@ pub trait LedgerStore {
     fn append(&mut self, key: &str, tx: Transaction) -> Result<(), LedgerError>;
 
     /// Current balance of an account in an asset.
-    fn balance(&self, account: &AccountId, asset: &Asset) -> i128;
+    fn balance(&self, account: &AccountId, asset: &Asset) -> Result<i128, LedgerError>;
 }
 
 /// In-memory store for tests and examples. The journal is the source of truth.
@@ -38,7 +38,7 @@ impl LedgerStore for InMemoryStore {
         Ok(())
     }
 
-    fn balance(&self, account: &AccountId, asset: &Asset) -> i128 {
+    fn balance(&self, account: &AccountId, asset: &Asset) -> Result<i128, LedgerError> {
         balance_of(&self.journal, account, asset)
     }
 }
@@ -70,8 +70,8 @@ mod tests {
         let mut store = InMemoryStore::new();
         store.append("tx-1", transfer()).unwrap();
 
-        assert_eq!(store.balance(&acc("card"), &asset("USD")), -100);
-        assert_eq!(store.balance(&acc("cash"), &asset("USD")), 100);
+        assert_eq!(store.balance(&acc("card"), &asset("USD")).unwrap(), -100);
+        assert_eq!(store.balance(&acc("cash"), &asset("USD")).unwrap(), 100);
     }
 
     #[test]
@@ -80,7 +80,7 @@ mod tests {
         store.append("tx-1", transfer()).unwrap();
         store.append("tx-1", transfer()).unwrap(); // same key, must be ignored
 
-        assert_eq!(store.balance(&acc("cash"), &asset("USD")), 100);
+        assert_eq!(store.balance(&acc("cash"), &asset("USD")).unwrap(), 100);
     }
 
     #[test]
@@ -94,13 +94,13 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(store.balance(&acc("cash"), &asset("USD")), 150);
-        assert_eq!(store.balance(&acc("card"), &asset("USD")), -150);
+        assert_eq!(store.balance(&acc("cash"), &asset("USD")).unwrap(), 150);
+        assert_eq!(store.balance(&acc("card"), &asset("USD")).unwrap(), -150);
     }
 
     #[test]
     fn unknown_account_has_zero_balance() {
         let store = InMemoryStore::new();
-        assert_eq!(store.balance(&acc("ghost"), &asset("USD")), 0);
+        assert_eq!(store.balance(&acc("ghost"), &asset("USD")).unwrap(), 0);
     }
 }
