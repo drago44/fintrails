@@ -20,6 +20,15 @@ pub enum SourceError {
     IncompleteLog(&'static str),
 }
 
+impl SourceError {
+    /// Whether retrying the same call could plausibly succeed. Only transient
+    /// transport failures (`Rpc`) qualify; a bad URL or undecodable/incomplete
+    /// log is deterministic and retrying it just burns attempts.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, SourceError::Rpc(_))
+    }
+}
+
 /// Anything that can go wrong while loading or persisting the resume cursor.
 #[derive(Debug, Error)]
 pub enum CheckpointError {
