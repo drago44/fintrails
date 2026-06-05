@@ -16,4 +16,8 @@ pub enum LedgerError {
     /// Accumulating an account balance exceeded the `i128` range.
     #[error("balance overflow for account {account:?} in asset {asset:?}")]
     Overflow { account: AccountId, asset: Asset },
+
+    /// An idempotency key was reused with a different transaction body.
+    #[error("idempotency key {key:?} reused with a different transaction")]
+    IdempotencyConflict { key: String },
 }
